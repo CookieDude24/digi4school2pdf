@@ -6,6 +6,9 @@ import time
 from urllib.parse import parse_qs
 from urllib.parse import urlparse
 
+if(os.name=="nt"):
+    os.environ['path'] += r';C:\Program Files\GTK3-Runtime Win64\bin'
+
 from bs4 import BeautifulSoup
 from cairosvg import svg2pdf
 from pypdf import PdfWriter
