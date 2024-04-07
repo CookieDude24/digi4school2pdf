@@ -3,35 +3,94 @@ import os
 import re
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import parse_qs
 from urllib.parse import urlparse
-
-if(os.name=="nt"):
-    os.environ['path'] += r';C:\Program Files\GTK3-Runtime Win64\bin'
-
+import requests
 from bs4 import BeautifulSoup
 from cairosvg import svg2pdf
 from pypdf import PdfWriter
 from selenium import webdriver
 from selenium.common import NoSuchElementException, ElementClickInterceptedException, StaleElementReferenceException
-from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 
+
+def convert_hpthek(book_id, page_number, platform_domain, cookies):
+    print(f"processing page {page_number}...")
+    s = requests.Session()
+    for cookie in cookies:
+        s.cookies.set(cookie['name'], cookie['value'])
+    while True:
+        try:
+            r = s.get(f"https://a.{platform_domain}/ebook/{selected_book}/{page_number}.svg")
+            source = r.text
+        except NoSuchElementException:
+            time.sleep(0.1)
+        finally:
+            print(source)
+            break
+
+    # save the svg file
+    file_name = f"./tmp/book-{page_number}.svg"
+    with open(file_name, "w", encoding="utf-8") as file:
+        file.write(source)
+
+    # open svg file to process all images
+    with open(file_name, "r", encoding="utf-8") as file:
+        svg_content = file.read()
+
+    soup = BeautifulSoup(svg_content, 'xml')
+    image_tags = soup.find_all('image')
+
+    # k is the counter for images of the page
+    k = 1
+    # download all images embedded in the svg
+    for image in image_tags:
+        # get url of image
+        print(f"processing image #{k} of page {page_number}")
+        image_href = image['xlink:href']
+
+        # screenshot image
+        driver.get(f"https://a.{platform_domain}/ebook/{book_id}/{image_href}")
+        while True:
+            try:
+                img = s.get(f"https://a.{platform_domain}/ebook/{book_id}/{image_href}")
+                if img.status_code == 200:
+                    with open(f"./tmp/{page_number}-{k}.png", 'wb') as f_screenshot:
+                        f_screenshot.write(img.content)
+                image['xlink:href'] = f"{page_number}-{k}.png"
+            except NoSuchElementException:
+                time.sleep(0.1)
+            except StaleElementReferenceException:
+                time.sleep(0.1)
+            finally:
+                break
+        k += 1
+
+    # write svg with modified paths to images
+    with open(file_name, 'w') as f:
+        f.write(str(soup))
+
+    time.sleep(10)
+
+# windows compatability
+if(os.name=="nt"):
+    os.environ['path'] += r';C:\Program Files\GTK3-Runtime Win64\bin'
+    
 # digi4school userdata
 print("Digi4School Credentials:")
 username = input("Email: ")
 password = getpass.getpass()
 
-# Set the path where the screenshot will be saved
+# Set things up
 path = os.path.dirname(os.path.abspath(__file__))
+merger = PdfWriter()
 
 # Configure Chrome WebDriver options
-options = Options()
-options.add_argument("--window-size=7680,4320")
-options.add_argument("--start-maximized")
-options.add_argument("--headless")
-options.add_argument("--disable-gpu")
 print("initializing browser...")
+options = webdriver.ChromeOptions()
+options.add_argument("--headless=new")
+options.enable_downloads = True
 
 # Initialize the Chrome WebDriver
 driver = webdriver.Chrome(options=options)
@@ -74,8 +133,8 @@ print(str(index).zfill(2) + " | abort")
 print("----------------------------------------------------------------")
 
 # get user selection
-selection = int(input(f"Select the book you want to convert to pdf or abort [{index}]: "))
-
+# selection = int(input(f"Select the book you want to convert to pdf or abort [{index}]: "))
+selection = 4
 # validate input
 if selection == index:
     sys.exit(0)
@@ -160,22 +219,25 @@ if platform == 2:
 
 elif platform == 1:
     time.sleep(2)
-
+    print("plattform 1")
     # go to last page
     time.sleep(1)
     go_last = driver.find_element(By.CSS_SELECTOR, '#btnLast')
     go_last.click()
-    time.sleep(1)
+    time.sleep(2)
     last_page_index = int(parse_qs((urlparse(driver.current_url)).query)['page'][0])
     last_page_index += 1  # the first index of the books is 1, therefore the last index is incremented by 1
 
     # go to first page
     go_first = driver.find_element(By.CSS_SELECTOR, "#btnFirst")
     go_first.click()
-    time.sleep(1)
+    time.sleep(2)
     first_page_index = int(parse_qs((urlparse(driver.current_url)).query)['page'][0])
     print(first_page_index, last_page_index)
     i = first_page_index
+
+    # get all cookies
+    cookies = driver.get_cookies()
 
     # get hpthek book-id because it differs from the digi4school book-id
     svg_path = driver.find_element(By.XPATH, "//object").get_attribute("data")
@@ -183,78 +245,13 @@ elif platform == 1:
     temp = re.findall(r'\d+', svg_path)
     selected_book = list(map(int, temp))[0]
 
-    while i != last_page_index:
-        print(f"processing page {i}...")
+    # initialize requests
+    with ThreadPoolExecutor() as executor:
+        for i in range(first_page_index, last_page_index):
+            t = executor.submit(convert_hpthek, selected_book, i, platform_domain, cookies)
+            print(t, convert_hpthek, selected_book, i, platform_domain, cookies)
 
-        # if the script fails during compilation or merging of the pages, this skips the redundant download of
-        # everything, this is not at the start because break statements cannot be used outside a loop
-        if os.path.exists(f"./tmp/book-{i}.svg"):
-            print(f"skipping downloading of pages because they already are")
-            i += 1
-            break
 
-        # download the svg
-        while True:
-            try:
-                driver.get(f"https://a.{platform_domain}/ebook/{selected_book}/{i}.svg")
-            except NoSuchElementException:
-                time.sleep(0.1)
-            finally:
-                break
-
-        # save the svg file
-        file_name = f"./tmp/book-{i}.svg"
-        with open(file_name, "w", encoding="utf-8") as file:
-            file.write(driver.page_source)
-
-        # open svg file to process all images
-        with open(file_name, "r", encoding="utf-8") as file:
-            svg_content = file.read()
-
-        soup = BeautifulSoup(svg_content, 'xml')
-        image_tags = soup.find_all('image')
-
-        # k is the counter for images of the page
-        k = 1
-        # download all images embedded in the svg
-        for image in image_tags:
-            # get url of image
-            print(f"processing image #{k} of page {i}")
-            image_href = image['xlink:href']
-
-            # screenshot image
-            driver.get(f"https://a.{platform_domain}/ebook/{selected_book}/{image_href}")
-            while True:
-                try:
-                    img = driver.find_element(By.TAG_NAME, "img")
-                    img.screenshot(f"./tmp/{i}-{k}.png")
-                    image['xlink:href'] = f"{i}-{k}.png"
-                except NoSuchElementException:
-                    time.sleep(0.1)
-                except StaleElementReferenceException:
-                    time.sleep(0.1)
-                finally:
-                    break
-            k += 1
-
-        # write svg with modified paths to images
-        with open(file_name, 'w') as f:
-            f.write(str(soup))
-
-        # go to next page
-        while True:
-            try:
-                go_next = driver.find_element(By.CSS_SELECTOR, "#btnNext")
-                go_next.click()
-            except ElementClickInterceptedException:
-                time.sleep(0.1)
-            except StaleElementReferenceException:
-                time.sleep(0.1)
-            except NoSuchElementException:
-                time.sleep(0.1)
-            finally:
-                break
-        i += 1
 else:
     time.sleep(2)
 
@@ -379,14 +376,13 @@ else:
 
 # svg to pdf
 print("compiling pages")
-for i in range(first_page_index, last_page_index):
-    print(f"compiling page {i}...")
-    svg2pdf(unsafe=True, write_to=f"./tmp/book-{i}.pdf", url=f"./tmp/book-{i}.svg")
+with ThreadPoolExecutor() as executor:
+    for i in range(first_page_index, last_page_index):
+        print(f"compiling page {i}...")
+        executor.submit(svg2pdf, unsafe=True, write_to=f"./tmp/book-{i}.pdf", url=f"./tmp/book-{i}.svg")
 
 # merge page into pdf
-merger = PdfWriter()
 print("merging pages...")
-print(first_page_index, last_page_index)
 for i in range(first_page_index, last_page_index):
     # convert to pdf
     try:
@@ -406,3 +402,4 @@ except FileNotFoundError:
 # stop everything
 driver.quit()
 merger.close()
+executor.shutdown()
