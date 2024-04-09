@@ -6,6 +6,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import parse_qs
 from urllib.parse import urlparse
+
 import requests
 from bs4 import BeautifulSoup
 from cairosvg import svg2pdf
@@ -39,7 +40,7 @@ def convert_hpthek(book_id, page_number, platform_domain, cookies):
     with open(file_name, "r", encoding="utf-8") as file:
         svg_content = file.read()
 
-    soup = BeautifulSoup(svg_content, 'xml')
+    soup = BeautifulSoup(source, 'xml')
     image_tags = soup.find_all('image')
 
     # k is the counter for images of the page
@@ -74,9 +75,9 @@ def convert_hpthek(book_id, page_number, platform_domain, cookies):
     time.sleep(10)
 
 # windows compatability
-if(os.name=="nt"):
+if (os.name == "nt"):
     os.environ['path'] += r';C:\Program Files\GTK3-Runtime Win64\bin'
-    
+
 # digi4school userdata
 print("Digi4School Credentials:")
 username = input("Email: ")
