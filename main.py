@@ -13,7 +13,7 @@ from cairosvg import svg2pdf
 from dotenv import load_dotenv
 from pypdf import PdfWriter
 from selenium import webdriver
-from selenium.common import NoSuchElementException, ElementClickInterceptedException, StaleElementReferenceException
+from selenium.common import NoSuchElementException, StaleElementReferenceException
 from selenium.webdriver.common.by import By
 
 
@@ -46,13 +46,62 @@ def convert_hpthek(book_id, page_number, platform_domain, cookies):
     for image in image_tags:
         # get url of image
         image_href = image['xlink:href']
-        image['xlink:href'] = f"{page_number}-{k}.png"
         file_extension = image_href.split(".")[1]
+        image['xlink:href'] = f"{page_number}-{k}.{file_extension}"
 
         # screenshot image
         while True:
             try:
                 img = s.get(f"https://a.{platform_domain}/ebook/{book_id}/{image_href}")
+                if img.status_code == 200:
+                    with open(f"./tmp/{page_number}-{k}.{file_extension}", 'wb') as f:
+                        f.write(img.content)
+            except NoSuchElementException:
+                time.sleep(0.1)
+            except StaleElementReferenceException:
+                time.sleep(0.1)
+            finally:
+                print(f"processed image #{k} of page {page_number}")
+                break
+        k += 1
+
+
+def convert_digi4school(book_id, page_number, platform_domain, cookies, svg_path):
+    print(f"processing page {page_number}...")
+
+    s = requests.Session()
+    for cookie in cookies:
+        s.cookies.set(cookie['name'], cookie['value'])
+
+    while True:
+        try:
+            r = s.get(f"https://a.{platform_domain}/ebook/{selected_book}/{svg_path}{page_number}.svg")
+        except NoSuchElementException:
+            time.sleep(0.1)
+        finally:
+            source = r.text
+            break
+
+    # save the svg file
+    file_name = f"./tmp/book-{page_number}.svg"
+
+    soup = BeautifulSoup(source, 'xml')
+    image_tags = soup.find_all('image')
+
+    # k is the counter for images of the page
+    k = 1
+
+    # download all images embedded in the svg
+    for image in image_tags:
+        # get url of image
+        image_href = image['xlink:href']
+        file_extension = image_href.split(".")[1]
+        image['xlink:href'] = f"{page_number}-{k}.{file_extension}"
+
+        # screenshot image
+        while True:
+            try:
+                img = s.get(f"https://a.{platform_domain}/ebook/{book_id}/{svg_path}{image_href}")
                 if img.status_code == 200:
                     with open(f"./tmp/{page_number}-{k}.{file_extension}", 'wb') as f:
                         f.write(img.content)
@@ -282,6 +331,9 @@ else:
     # get path to svg
     svg_path = driver.find_element(By.XPATH, "//object").get_attribute("data")
 
+    # get cookies
+    cookies = driver.get_cookies()
+
     # detect if ebook uses special path to svg
     # noinspection RegExpRedundantEscape
     regex_pattern = re.compile(r'^(https:\/\/a\.digi4school\.at\/ebook\/\d+\/\d+\/)([^\/]+\.svg)$')
@@ -290,92 +342,14 @@ else:
     else:
         # in this case the standard path is used
         svg_path = ''
+    with ThreadPoolExecutor() as executor:
+        for i in range(first_page_index, last_page_index):
+            print(f"processing page {i}...")
 
-    while i != last_page_index:
-        print(f"processing page {i}...")
+            if svg_path != '' and svg_path != 'placeholder':
+                svg_path = str(i) + "/"
 
-        # if the script fails during compilation or merging of the pages, this skips the redundant download of
-        # everything, this is not at the start because break statements cannot be used outside a loop
-        if os.path.exists(f"./tmp/book-{i}.svg"):
-            print(f"skipping downloading of pages because they already are")
-            i += 1
-            break
-
-        current_url = driver.current_url
-
-        # some books have special paths
-        # most books with special paths use the following path ebook/$EBOOK-ID/$PAGE-NUMBER/$PAGE-NUMBER.svg
-        # but some ebooks use extra special paths: ebook/$EBOOK-ID/1/$PAGE-NUMBER.svg
-        if svg_path != '':
-            svg_path = str(i) + "/"
-
-        # download the svg
-        while True:
-            try:
-                driver.get(f"https://a.{platform_domain}/ebook/{selected_book}/{svg_path}{i}.svg")
-
-                # some books have extra special paths, detection simply works by checking if the requested page exists
-                if driver.find_element(By.TAG_NAME, "h3").text == "digi4school - Fehler":
-                    driver.get(f"https://a.{platform_domain}/ebook/{selected_book}/1/{i}.svg")
-                    svg_path = "1/"
-            except NoSuchElementException:
-                time.sleep(0.1)
-            finally:
-                break
-
-        # save the svg file
-        file_name = f"./tmp/book-{i}.svg"
-        with open(file_name, "w", encoding="utf-8") as file:
-            file.write(driver.page_source)
-
-        # open svg file to process all images
-        with open(file_name, "r", encoding="utf-8") as file:
-            svg_content = file.read()
-
-        soup = BeautifulSoup(svg_content, 'xml')
-        image_tags = soup.find_all('image')
-
-        # k is the counter for images of the page
-        k = 1
-        # download all images embedded in the svg
-        for image in image_tags:
-            # get url of image
-            print(f"processing image #{k} of page {i}")
-            image_href = image['xlink:href']
-
-            # screenshot image
-            driver.get(f"https://a.{platform_domain}/ebook/{selected_book}/{svg_path}{image_href}")
-            while True:
-                try:
-                    img = driver.find_element(By.TAG_NAME, "img")
-                    img.screenshot(f"./tmp/{i}-{k}.png")
-                    image['xlink:href'] = f"{i}-{k}.png"
-                except NoSuchElementException:
-                    time.sleep(0.1)
-                except StaleElementReferenceException:
-                    time.sleep(0.1)
-                finally:
-                    break
-            k += 1
-
-        # write svg with modified paths to images
-        with open(file_name, 'w') as f:
-            f.write(str(soup))
-
-        # go to next page
-        while True:
-            try:
-                go_next = driver.find_element(By.CSS_SELECTOR, "#btnNext")
-                go_next.click()
-            except ElementClickInterceptedException:
-                time.sleep(0.1)
-            except StaleElementReferenceException:
-                time.sleep(0.1)
-            except NoSuchElementException:
-                time.sleep(0.1)
-            finally:
-                break
-        i += 1
+            executor.submit(convert_digi4school, selected_book, i, platform_domain, cookies, svg_path)
 
 # merge page into pdf
 print("merging pages...")
