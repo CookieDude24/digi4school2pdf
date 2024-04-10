@@ -47,14 +47,15 @@ def convert_hpthek(book_id, page_number, platform_domain, cookies):
         # get url of image
         image_href = image['xlink:href']
         image['xlink:href'] = f"{page_number}-{k}.png"
+        file_extension = image_href.split(".")[1]
 
         # screenshot image
         while True:
             try:
                 img = s.get(f"https://a.{platform_domain}/ebook/{book_id}/{image_href}")
                 if img.status_code == 200:
-                    with open(f"./tmp/{page_number}-{k}.png", 'wb') as f_screenshot:
-                        f_screenshot.write(img.content)
+                    with open(f"./tmp/{page_number}-{k}.{file_extension}", 'wb') as f:
+                        f.write(img.content)
             except NoSuchElementException:
                 time.sleep(0.1)
             except StaleElementReferenceException:
