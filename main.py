@@ -1,15 +1,16 @@
-import getpass
 import os
 import re
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
+from getpass import getpass
 from urllib.parse import parse_qs
 from urllib.parse import urlparse
 
 import requests
 from bs4 import BeautifulSoup
 from cairosvg import svg2pdf
+from dotenv import load_dotenv
 from pypdf import PdfWriter
 from selenium import webdriver
 from selenium.common import NoSuchElementException, ElementClickInterceptedException, StaleElementReferenceException
@@ -18,53 +19,48 @@ from selenium.webdriver.common.by import By
 
 def convert_hpthek(book_id, page_number, platform_domain, cookies):
     print(f"processing page {page_number}...")
+
     s = requests.Session()
     for cookie in cookies:
         s.cookies.set(cookie['name'], cookie['value'])
+
     while True:
         try:
             r = s.get(f"https://a.{platform_domain}/ebook/{selected_book}/{page_number}.svg")
-            source = r.text
         except NoSuchElementException:
             time.sleep(0.1)
         finally:
-            print(source)
+            source = r.text
             break
 
     # save the svg file
     file_name = f"./tmp/book-{page_number}.svg"
-    with open(file_name, "w", encoding="utf-8") as file:
-        file.write(source)
-
-    # open svg file to process all images
-    with open(file_name, "r", encoding="utf-8") as file:
-        svg_content = file.read()
 
     soup = BeautifulSoup(source, 'xml')
     image_tags = soup.find_all('image')
 
     # k is the counter for images of the page
     k = 1
+
     # download all images embedded in the svg
     for image in image_tags:
         # get url of image
-        print(f"processing image #{k} of page {page_number}")
         image_href = image['xlink:href']
+        image['xlink:href'] = f"{page_number}-{k}.png"
 
         # screenshot image
-        driver.get(f"https://a.{platform_domain}/ebook/{book_id}/{image_href}")
         while True:
             try:
                 img = s.get(f"https://a.{platform_domain}/ebook/{book_id}/{image_href}")
                 if img.status_code == 200:
                     with open(f"./tmp/{page_number}-{k}.png", 'wb') as f_screenshot:
                         f_screenshot.write(img.content)
-                image['xlink:href'] = f"{page_number}-{k}.png"
             except NoSuchElementException:
                 time.sleep(0.1)
             except StaleElementReferenceException:
                 time.sleep(0.1)
             finally:
+                print(f"processed image #{k} of page {page_number}")
                 break
         k += 1
 
@@ -72,16 +68,20 @@ def convert_hpthek(book_id, page_number, platform_domain, cookies):
     with open(file_name, 'w') as f:
         f.write(str(soup))
 
-    time.sleep(10)
+    # write svg with modified paths to images
+    svg2pdf(unsafe=True, write_to=f"./tmp/book-{page_number}.pdf", url=file_name)
 
-# windows compatability
-if (os.name == "nt"):
-    os.environ['path'] += r';C:\Program Files\GTK3-Runtime Win64\bin'
 
 # digi4school userdata
-print("Digi4School Credentials:")
-username = input("Email: ")
-password = getpass.getpass()
+load_dotenv()
+if os.getenv('DIGI4SCHOOL_USERNAME') is None:
+    username = input("Username: ")
+else:
+    username = str(os.getenv('DIGI4SCHOOL_USERNAME'))
+if os.getenv('DIGI4SCHOOL_PASSWORD') is None:
+    password = getpass()
+else:
+    password = str(os.getenv('DIGI4SCHOOL_PASSWORD'))
 
 # Set things up
 path = os.path.dirname(os.path.abspath(__file__))
@@ -134,8 +134,11 @@ print(str(index).zfill(2) + " | abort")
 print("----------------------------------------------------------------")
 
 # get user selection
-# selection = int(input(f"Select the book you want to convert to pdf or abort [{index}]: "))
-selection = 4
+if os.getenv('BOOK_INDEX') is None:
+    selection = int(input(f"Select the book you want to convert to pdf or abort [{index}]: "))
+else:
+    selection = int(os.getenv('BOOK_INDEX'))
+
 # validate input
 if selection == index:
     sys.exit(0)
@@ -250,8 +253,6 @@ elif platform == 1:
     with ThreadPoolExecutor() as executor:
         for i in range(first_page_index, last_page_index):
             t = executor.submit(convert_hpthek, selected_book, i, platform_domain, cookies)
-            print(t, convert_hpthek, selected_book, i, platform_domain, cookies)
-
 
 else:
     time.sleep(2)
@@ -374,13 +375,6 @@ else:
             finally:
                 break
         i += 1
-
-# svg to pdf
-print("compiling pages")
-with ThreadPoolExecutor() as executor:
-    for i in range(first_page_index, last_page_index):
-        print(f"compiling page {i}...")
-        executor.submit(svg2pdf, unsafe=True, write_to=f"./tmp/book-{i}.pdf", url=f"./tmp/book-{i}.svg")
 
 # merge page into pdf
 print("merging pages...")
