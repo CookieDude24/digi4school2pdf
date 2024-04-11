@@ -8,6 +8,7 @@ from urllib.parse import parse_qs
 from urllib.parse import urlparse
 
 import requests
+from PIL import Image
 from bs4 import BeautifulSoup
 from cairosvg import svg2pdf
 from dotenv import load_dotenv
@@ -66,6 +67,35 @@ def convert_hpthek(book_id, page_number, platform_domain, cookies):
         k += 1
 
 
+def convert_scook(book_url, page_number, cookies):
+    print(f"processing page {page_number}...")
+
+    page_number_without_leading_zeros = page_number
+    page_number = str(page_number).zfill(3)
+
+    s = requests.Session()
+    for cookie in cookies:
+        s.cookies.set(cookie['name'], cookie['value'])
+
+    file_name = f"./tmp/{page_number}.jpg"
+
+    while True:
+        try:
+            img = s.get(f"{book_url}{page_number}.jpg")
+            if img.status_code == 200:
+                with open(file_name, 'wb') as f:
+                    f.write(img.content)
+        except NoSuchElementException:
+            time.sleep(0.1)
+        except StaleElementReferenceException:
+            time.sleep(0.1)
+        finally:
+            time.sleep(1)
+            break
+
+    # write svg with modified paths to images
+    Image.open(file_name).convert("RGB").save(f"./tmp/book-{page_number_without_leading_zeros}.pdf")
+
 def convert_digi4school(book_id, page_number, platform_domain, cookies, svg_path):
     print(f"processing page {page_number}...")
 
@@ -120,7 +150,6 @@ def convert_digi4school(book_id, page_number, platform_domain, cookies, svg_path
 
     # write svg with modified paths to images
     svg2pdf(unsafe=True, write_to=f"./tmp/book-{page_number}.pdf", url=file_name)
-
 
 # digi4school userdata
 load_dotenv()
@@ -258,18 +287,19 @@ if platform == 2:
     first_page_index = int(
         driver.find_element(By.CSS_SELECTOR, "input[class='current-page']").get_attribute("placeholder"))
 
-    go_next = driver.find_element(By.CSS_SELECTOR, "button[class='btn go-next'")
+    # get all cookies
+    cookies = driver.get_cookies()
 
-    # take screenshot of all pages
-    for i in range(first_page_index, last_page_index):
-        print(f"processing page {i}...")
-        full_page = driver.find_element(By.XPATH, "/html/body/div[3]/div/div[2]/div/div/div/div[4]/img")
-        while not (full_page.get_property("complete")):
-            time.sleep(0.1)
-        full_page.screenshot(f"{book}-{i}.png")
+    # this value is hardcoded it should only cut off ${3_DIGIT_PAGE_NUMBER}.jpg
+    # if it doesn't idc because I'm to lazy to properly implement this feature
+    image_href = driver.find_element(By.XPATH, "//img").get_attribute("src")
+    book_url = image_href[0:-7]
 
-        # go to next page
-        go_next.click()
+    # download all pages
+    with ThreadPoolExecutor() as executor:
+        for i in range(first_page_index, last_page_index):
+            t = executor.submit(convert_scook, book_url, i, cookies)
+
 
 elif platform == 1:
     time.sleep(2)
