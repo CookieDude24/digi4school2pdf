@@ -21,17 +21,17 @@ from selenium.webdriver.common.by import By
 def convert_hpthek(book_id, page_number, platform_domain, cookies):
     print(f"processing page {page_number}...")
 
-    s = requests.Session()
+    request = requests.Session()
     for cookie in cookies:
-        s.cookies.set(cookie['name'], cookie['value'])
+        request.cookies.set(cookie['name'], cookie['value'])
 
     while True:
         try:
-            r = s.get(f"https://a.{platform_domain}/ebook/{selected_book}/{page_number}.svg")
+            response = request.get(f"https://a.{platform_domain}/ebook/{book_id}/{page_number}.svg")
         except NoSuchElementException:
             time.sleep(0.1)
         finally:
-            source = r.text
+            source = response.text
             break
 
     # save the svg file
@@ -53,7 +53,7 @@ def convert_hpthek(book_id, page_number, platform_domain, cookies):
         # screenshot image
         while True:
             try:
-                img = s.get(f"https://a.{platform_domain}/ebook/{book_id}/{image_href}")
+                img = request.get(f"https://a.{platform_domain}/ebook/{book_id}/{image_href}")
                 if img.status_code == 200:
                     with open(f"./tmp/{page_number}-{k}.{file_extension}", 'wb') as f:
                         f.write(img.content)
@@ -73,15 +73,15 @@ def convert_scook(book_url, page_number, cookies):
     page_number_without_leading_zeros = page_number
     page_number = str(page_number).zfill(3)
 
-    s = requests.Session()
+    request = requests.Session()
     for cookie in cookies:
-        s.cookies.set(cookie['name'], cookie['value'])
+        request.cookies.set(cookie['name'], cookie['value'])
 
     file_name = f"./tmp/{page_number}.jpg"
 
     while True:
         try:
-            img = s.get(f"{book_url}{page_number}.jpg")
+            img = request.get(f"{book_url}{page_number}.jpg")
             if img.status_code == 200:
                 with open(file_name, 'wb') as f:
                     f.write(img.content)
@@ -96,20 +96,21 @@ def convert_scook(book_url, page_number, cookies):
     # write svg with modified paths to images
     Image.open(file_name).convert("RGB").save(f"./tmp/book-{page_number_without_leading_zeros}.pdf")
 
+
 def convert_digi4school(book_id, page_number, platform_domain, cookies, svg_path):
     print(f"processing page {page_number}...")
 
-    s = requests.Session()
+    request = requests.Session()
     for cookie in cookies:
-        s.cookies.set(cookie['name'], cookie['value'])
+        request.cookies.set(cookie['name'], cookie['value'])
 
     while True:
         try:
-            r = s.get(f"https://a.{platform_domain}/ebook/{selected_book}/{svg_path}{page_number}.svg")
+            response = request.get(f"https://a.{platform_domain}/ebook/{selected_book}/{svg_path}{page_number}.svg")
         except NoSuchElementException:
             time.sleep(0.1)
         finally:
-            source = r.text
+            source = response.text
             break
 
     # save the svg file
@@ -131,7 +132,7 @@ def convert_digi4school(book_id, page_number, platform_domain, cookies, svg_path
         # screenshot image
         while True:
             try:
-                img = s.get(f"https://a.{platform_domain}/ebook/{book_id}/{svg_path}{image_href}")
+                img = request.get(f"https://a.{platform_domain}/ebook/{book_id}/{svg_path}{image_href}")
                 if img.status_code == 200:
                     with open(f"./tmp/{page_number}-{k}.{file_extension}", 'wb') as f:
                         f.write(img.content)
@@ -150,6 +151,7 @@ def convert_digi4school(book_id, page_number, platform_domain, cookies, svg_path
 
     # write svg with modified paths to images
     svg2pdf(unsafe=True, write_to=f"./tmp/book-{page_number}.pdf", url=file_name)
+
 
 # digi4school userdata
 load_dotenv()
@@ -249,24 +251,20 @@ except FileExistsError:
 # check which platform the ebook uses
 if "https://a.digi4school.at/" in driver.current_url:
     print("platform: Digi4School")
-    platform = 0
     platform_domain = "digi4school.at"
 
 elif "https://a.hpthek.at/" in driver.current_url:
     print("platform: hpthek")
-    platform = 1
     platform_domain = "hpthek.at"
 
 elif "https://www.scook.at/" in driver.current_url:
     print("platform: scook.at")
-    platform = 2
     platform_domain = "scook.at"
 else:
     print("platform not detected, defaulting to Digi4School")
-    platform = 0
     platform_domain = "digi4school.at"
 
-if platform == 2:
+if platform_domain == "scook.at":
     # switch to iframe
     iframe = driver.find_element(By.XPATH, "//iframe")
     driver.switch_to.frame(iframe)
@@ -301,7 +299,7 @@ if platform == 2:
             t = executor.submit(convert_scook, book_url, i, cookies)
 
 
-elif platform == 1:
+elif platform_domain == "hpthek.at":
     time.sleep(2)
     print("plattform 1")
     # go to last page
@@ -334,7 +332,7 @@ elif platform == 1:
         for i in range(first_page_index, last_page_index):
             t = executor.submit(convert_hpthek, selected_book, i, platform_domain, cookies)
 
-else:
+elif platform_domain == "digi4school.at":
     time.sleep(2)
 
     if driver.current_url == f"https://a.digi4school.at/ebook/{selected_book}/":
