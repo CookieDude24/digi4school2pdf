@@ -34,7 +34,6 @@ def convert_hpthek(book_id, page_number, platform_domain, cookies):
             source = response.text
             break
 
-    # save the svg file
     file_name = f"./tmp/book-{page_number}.svg"
 
     soup = BeautifulSoup(source, 'xml')
@@ -66,6 +65,12 @@ def convert_hpthek(book_id, page_number, platform_domain, cookies):
                 break
         k += 1
 
+    # write svg with modified paths to images
+    with open(file_name, 'w') as f:
+        f.write(str(soup))
+
+    # write svg with modified paths to images
+    svg2pdf(unsafe=True, write_to=f"./tmp/book-{page_number}.pdf", url=file_name)
 
 def convert_scook(book_url, page_number, cookies):
     print(f"processing page {page_number}...")
@@ -113,7 +118,6 @@ def convert_digi4school(book_id, page_number, platform_domain, cookies, svg_path
             source = response.text
             break
 
-    # save the svg file
     file_name = f"./tmp/book-{page_number}.svg"
 
     soup = BeautifulSoup(source, 'xml')
@@ -300,8 +304,7 @@ if platform_domain == "scook.at":
 
 
 elif platform_domain == "hpthek.at":
-    time.sleep(2)
-    print("plattform 1")
+
     # go to last page
     time.sleep(1)
     go_last = driver.find_element(By.CSS_SELECTOR, '#btnLast')
