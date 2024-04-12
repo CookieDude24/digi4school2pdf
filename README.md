@@ -4,6 +4,7 @@ this project is only intended for educational purposes, **do not** actually use 
 
 ## usage
 
-### windows
+## environment variables
 
-requires gtk for windows -> [download here](https://github.com/tschoonj/GTK-for-Windows-Runtime-Environment-Installer/releases)
+- DIGI4SCHOOL_PASSWORD="Cisco123"
+- DIGI4SCHOOL_USERNAME="me@example.com"
